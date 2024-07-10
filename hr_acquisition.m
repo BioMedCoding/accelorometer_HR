@@ -43,8 +43,10 @@ filter_data_attenuation = ~filter_data_classic;
 
 plot_raw_data = true;
 
+plot_tf_filters = true;
+
 show_original_psd = true;
-show_filtered_psd = true;
+show_filtered_psd = false;
     plot_signal_psd_comparison = show_filtered_psd&show_filtered_psd;
 
 plot_signal_comparison = true;
@@ -132,7 +134,7 @@ if show_original_psd
         % hold on
         
         % Compute and normalize PSD for raw signal
-        [psd_raw(:,i), f_raw] = psd_general(raw_signals{i},"welch",fs);
+        [psd_raw(:,i), f_raw] = psd_general(raw_signals{i},"welch",fs,normalization="no");
         psd_raw(:,i) = psd_raw(:,i) / max(psd_raw(:,i)); % Normalize the PSD
         plot(f_raw, psd_raw(:,i))
         
@@ -186,7 +188,9 @@ if filter_data_attenuation
                 fprintf("\nHighest attenuation possible with these parameters is %d \n", attenuation)
                 fprintf("\nFiltering parameters are: low_edge %.1f, high_edge %.1f, rpL: %.1f, rpH %.1f, attenuation %.1 \n", percL*low_cutoff_freq, percH*high_cutoff_freq, rpL, rpH, attenuation)
                 figure
-                freqz(bH, aH, 512, fs)
+                if plot_tf_filters
+                    freqz(bH, aH, 512, fs)
+                end
                 % High-pass applicaiton
                 filtData_x = filtfilt(bH, aH, rawData_x);
                 filtData_y = filtfilt(bH, aH, rawData_y);
@@ -195,7 +199,9 @@ if filter_data_attenuation
 
                 % Low-pass applicaiton
                 figure
-                freqz(bL, aL, 512, fs)
+                if plot_tf_filters
+                    freqz(bL, aL, 512, fs)
+                end
                 filtData_x = filtfilt(bL, aL, filtData_x);
                 filtData_y = filtfilt(bL, aL, filtData_y);
                 filtData_z = filtfilt(bL, aL, filtData_z);
@@ -278,7 +284,7 @@ if show_filtered_psd
         subplot(4,1,i)
         
         % Compute and normalize PSD for raw signal
-        [psd_filt(:,i), f_filt] = psd_general(filt_signals{i},"welch",fs);
+        [psd_filt(:,i), f_filt] = psd_general(filt_signals{i},"welch",fs,normalization="no");
         psd_filt(:,i) = psd_filt(:,i) / max(psd_filt(:,i)); % Normalize the PSD
         plot(f_filt, psd_filt(:,i))
         
@@ -367,3 +373,11 @@ legend("Heart beat", "Filtered signal")
 dt_medio = diff(locs);
 mean_hr = 1/(mean(dt_medio)/fs)*60;
 fprintf("\n \nThe calculated HR is %.0f \n",mean_hr)
+
+
+
+%% NN Data creation
+
+signal_label = zeros(size(rawData_total,1),1);
+signal_label(locs) = 1;
+
