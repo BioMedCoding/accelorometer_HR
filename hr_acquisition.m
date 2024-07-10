@@ -10,30 +10,36 @@ starting_sample = 1000;
 ending_sample = 4000;
 
 % optimzed parameters
-low_freq_vec = 0.01:0.01:0.51;
-high_freq_vec = 1:0.5:7;
+low_freq_vec =  0.01:0.1:0.51;
+high_freq_vec =  1:0.5:7;
 percH_values = 1:0.1:2;
 percL_values = 0.5:0.05:1;
-max_ripple = 2;
-attenuation = 20;
+max_ripple_values = [0.5, 1, 1.5, 2, 3];
+attenuation_values = [15, 20, 30, 45];
+verbose = true;
 
 % classic paramters
-high_cutoff_freq = 3;   %0.5
+high_cutoff_freq = 5;   %0.5
 low_cutoff_freq = 0.5;   %0.01 for breath
-percH = 1.2;
-percL = 0.5;
-rpH = 2;
-rpL = 2;
+percH = 1.15;
+percL = 0.85;
+rpH = 1;
+rpL = 1;
+
+attenuation = 20;
+maximum_filter_order = 10;
 
 % Define the prototype filter with desired stopband edges
 prototype_filter = struct();
 prototype_filter.low_stopband = 0.5;  % Example stopband edge for low-pass filter (normalized frequency)
-prototype_filter.high_stopband = 3; % Example stopband edge for high-pass filter (normalized frequency)
+prototype_filter.high_stopband = 4; % Example stopband edge for high-pass filter (normalized frequency)
 
 
 %% Section parameters
-filter_data_classic = true;
-filter_data_optimised = ~filter_data_classic;
+filter_data_classic = false;
+%filter_data_optimised = ~filter_data_classic;
+filter_data_optimised = false;
+filter_data_attenuation = ~filter_data_classic;
 
 plot_raw_data = true;
 
@@ -46,25 +52,19 @@ plot_signal_comparison = true;
 
 %% Findpeaks parameters
 min_peak_prominence = 0.1; % 0.01; for breath rate
-min_peak_time_distance = 0.25; % Expressed in seconds
+min_peak_time_distance = 0.2; % Expressed in seconds
 min_threshold = 0.00001;
 
 
 %% Data import and separation
-%raw_data = readmatrix("Raw Data.csv");
-%attitude = readmatrix("Attitude.csv");
-%raw_data = readmatrix("Acceleration and Attitude 2024-07-08 14-32-54\test_movimento_3_assi\Raw Data.csv");
-%attitude = readmatrix("Acceleration and Attitude 2024-07-08 14-32-54\test_movimento_3_assi\Attitude.csv");
-raw_data = readmatrix("Raw Data_resting_Matteo.csv");
-%raw_data = readmatrix("test\Linear Acceleration.csv");
-
-raw_data = raw_data(starting_sample:min(ending_sample,length(raw_data)),:);
-
+%attitude = readmatrix("Signals\test\)
 %attitude_t = attitude(:,1);
 %attitude_phi = attitude(:,2);
 %attitude_theta = attitude(:,3);
 %attitude_psi = attitude(:,4);
 
+raw_data = readmatrix("Signals\Raw Data_resting_Matteo.csv");
+raw_data = raw_data(starting_sample:min(ending_sample,length(raw_data)),:); % Data segmentation
 rawData_t = raw_data(:,1);
 rawData_x = raw_data(:,2);
 rawData_y = raw_data(:,3);
@@ -88,21 +88,28 @@ if plot_raw_data
     subplot(4,1,1)
     plot(time_support,rawData_x)
     title("RAW acceleration - x")
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
     
     subplot(4,1,2)
     plot(time_support,rawData_y)
     title("RAW acceleration - y")
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
     
     subplot(4,1,3)
     plot(time_support,rawData_z)
     title("RAW acceleration - z")
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
 
     subplot(4,1,4)
     plot(time_support,rawData_total)
     title("RAW acceleration - total")
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
     
     linkaxes([subplot(4,1,1) subplot(4,1,2) subplot(4,1,3) subplot(4,1,4)], 'xy')
-
     sgtitle("RAW data")
 end
 
@@ -131,20 +138,75 @@ if show_original_psd
         
         % Set title and legend
         title(raw_titles(i))
+        xlabel("Frequency [Hz]")
+        ylabel("Relative power [a.u.]")
     end
     
     % Add a general title
     sgtitle('PSD of raw signals')
     
+    
     % Link axes for better comparison
     linkaxes([subplot(4,1,1) subplot(4,1,2) subplot(4,1,3) subplot(4,1,4)], 'xy')
 end
 
-clear signals, show_original_psd
+clear signals show_original_psd
 %% Filter data
 
 if filter_data_optimised
-    [ranked_combinations, filtData_x, filtData_y, filtData_z, filtData_total] = optimize_filter_params(rawData_x, rawData_y, rawData_z, rawData_total, fs, low_freq_vec, high_freq_vec, max_ripple, percH_values, percL_values,attenuation,prototype_filter);
+    [ranked_combinations, filtData_x, filtData_y, filtData_z, filtData_total] = optimize_filter_params(rawData_x, rawData_y, rawData_z, rawData_total, fs, low_freq_vec, high_freq_vec, max_ripple_values, attenuation_values, percH_values, percL_values,prototype_filter, verbose);
+end
+
+if filter_data_attenuation
+    stability = true;
+    fNy = fs/2;
+    while stability
+        % High pass filter
+        [nH, WsH] = cheb2ord(low_cutoff_freq/fNy,(percL*low_cutoff_freq)/fNy , rpL, attenuation);
+        [bH,aH] = cheby2(nH,attenuation,WsH,"high");
+        stability_high = isstable(bH,aH);
+        if nH > maximum_filter_order
+            fprintf("nH superiore al limite")
+        end
+
+        % Low pass filter
+        [nL, WsL] = cheb2ord(high_cutoff_freq/fNy,(percH*high_cutoff_freq)/fNy , rpH, attenuation);
+        [bL,aL] = cheby2(nL,attenuation,WsL,"low");
+        stability_low = isstable(bL,aL);
+        if nL > maximum_filter_order
+            fprintf("nL superiore al limite")
+        end
+
+
+        if ~(stability_high&&stability_low) || nH > maximum_filter_order || nL>maximum_filter_order %|| attenuation >20
+            stability = false;
+            if  attenuation == 20
+                fprintf("The filter is not stable")
+            else
+                fprintf("\nHighest attenuation possible with these parameters is %d \n", attenuation)
+                fprintf("\nFiltering parameters are: low_edge %.1f, high_edge %.1f, rpL: %.1f, rpH %.1f, attenuation %.1 \n", percL*low_cutoff_freq, percH*high_cutoff_freq, rpL, rpH, attenuation)
+                figure
+                freqz(bH, aH, 512, fs)
+                % High-pass applicaiton
+                filtData_x = filtfilt(bH, aH, rawData_x);
+                filtData_y = filtfilt(bH, aH, rawData_y);
+                filtData_z = filtfilt(bH, aH , rawData_z);
+                filtData_total = filtfilt(bH, aH, rawData_total); 
+
+                % Low-pass applicaiton
+                figure
+                freqz(bL, aL, 512, fs)
+                filtData_x = filtfilt(bL, aL, filtData_x);
+                filtData_y = filtfilt(bL, aL, filtData_y);
+                filtData_z = filtfilt(bL, aL, filtData_z);
+                filtData_total = filtfilt(bL, aL, filtData_total);
+
+            end
+        else
+            attenuation = attenuation + 2;
+        end
+
+    end
 end
 
 if filter_data_classic
@@ -163,6 +225,8 @@ if plot_signal_comparison
     plot(time_support,rawData_x)
     title('Comparison of Filtered and Raw Data - X')
     legend('Filtered Data', 'Raw Data')
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
     
     subplot(4,1,2)
     plot(time_support,filtData_y)
@@ -170,6 +234,8 @@ if plot_signal_comparison
     plot(time_support,rawData_y)
     title('Comparison of Filtered and Raw Data - Y')
     legend('Filtered Data', 'Raw Data')
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
     
     subplot(4,1,3)
     plot(time_support,filtData_z)
@@ -177,6 +243,8 @@ if plot_signal_comparison
     plot(time_support,rawData_z)
     title('Comparison of Filtered and Raw Data - Z')
     legend('Filtered Data', 'Raw Data')
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
 
     subplot(4,1,4)
     plot(time_support,filtData_total)
@@ -184,11 +252,14 @@ if plot_signal_comparison
     plot(time_support,rawData_total)
     title('Comparison of Filtered and Raw Data - Total')
     legend('Filtered Data', 'Raw Data')
+    xlabel("Seconds [s]")
+    ylabel("Acceleration [m/s^2]")
 
     linkaxes([subplot(4,1,1) subplot(4,1,2) subplot(4,1,3) subplot(4,1,4)], 'xy')
 
     % Add a general title for the entire figure
     sgtitle('Filtered vs. Raw Data Comparison')
+    
 end
 
 clear filter_data_optimised filter_data_classic plot_signal_comparison
@@ -213,6 +284,8 @@ if show_filtered_psd
         
         % Set title and legend
         title(filt_titles(i))
+        xlabel("Frequency [Hz]")
+        ylabel("Relative power [a.u.]")
     end
     
     % Add a general title
@@ -232,6 +305,8 @@ clear filt_signals filt_titles show_filtered_psd
         plot(f_filt,psd_filt(:,1))
         title('Comparison of Filtered and Raw Data PSD - X')
         legend('RAW data', 'Filtered Data')
+        xlabel("Frequency [Hz]")
+        ylabel("Relative power [a.u.]")
         
         subplot(4,1,2)
         plot(f_filt,psd_raw(:,2))
@@ -239,6 +314,8 @@ clear filt_signals filt_titles show_filtered_psd
         plot(f_filt,psd_filt(:,2))
         title('Comparison of Filtered and Raw Data PSD - Y')
         legend('RAW data', 'Filtered Data')
+        xlabel("Frequency [Hz]")
+        ylabel("Relative power [a.u.]")
         
         subplot(4,1,3)
         plot(f_filt,psd_raw(:,3))
@@ -246,6 +323,8 @@ clear filt_signals filt_titles show_filtered_psd
         plot(f_filt,psd_filt(:,3))
         title('Comparison of Filtered and Raw Data PSD - Z')
         legend('RAW data', 'Filtered Data')
+        xlabel("Frequency [Hz]")
+        ylabel("Relative power [a.u.]")
     
         subplot(4,1,4)
         plot(f_filt,psd_raw(:,4))
@@ -253,11 +332,14 @@ clear filt_signals filt_titles show_filtered_psd
         plot(f_filt,psd_filt(:,4))
         title('Comparison of Filtered and Raw Data PSD - Total')
         legend('RAW data', 'Filtered Data')
+        xlabel("Frequency [Hz]")
+        ylabel("Relative power [a.u.]")
     
         linkaxes([subplot(4,1,1) subplot(4,1,2) subplot(4,1,3) subplot(4,1,4)], 'xy')
     
         % Add a general title for the entire figure
         sgtitle('Filtered vs. Raw Data Comparison PSD')
+        
     end
 
 clear plot_signal_psd_comparison
@@ -274,9 +356,14 @@ figure
 plot(locs,pks,'O')
 hold on
 plot(filtData_total)
+% hold on
+% plot(rawData_total)
 xlabel("Samples")
+ylabel("Acceleration [m/s^2]")
 title("HR peak detected on Original signal")
+%legend("Heart beat", "Filtered signal", "Original signal")
+legend("Heart beat", "Filtered signal")
 
 dt_medio = diff(locs);
 mean_hr = 1/(mean(dt_medio)/fs)*60;
-fprintf("The calculated HR is %.0f \n",mean_hr)
+fprintf("\n \nThe calculated HR is %.0f \n",mean_hr)
