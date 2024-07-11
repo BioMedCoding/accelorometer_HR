@@ -8,8 +8,8 @@ clc
 select_data = true;
 
 % Initial and ending value 
-starting_sample = 100;
-ending_sample = 100000;
+starting_sample = 600;
+ending_sample = 1000000;
 
 use_cheby2 = true;
 
@@ -38,7 +38,7 @@ prototype_filter = struct();
 prototype_filter.low_stopband = 0.5;  % Example stopband edge for low-pass filter (normalized frequency)
 prototype_filter.high_stopband = 4; % Example stopband edge for high-pass filter (normalized frequency)
 
-
+save_figures = false; 
 %% Section parameters
 filter_data_classic = false;
 %filter_data_optimised = ~filter_data_classic;
@@ -55,9 +55,10 @@ show_filtered_psd = false;
 
 plot_signal_comparison = true;
 
-
+use_exponential = true;
+use_cwt = false;
 %% Findpeaks parameters
-min_peak_prominence = 0.1; % 0.01; for breath rate
+min_peak_prominence = 0.05; % 0.01; for breath rate
 min_peak_time_distance = 0.35; % Expressed in seconds
 min_threshold = 0.00001;
 
@@ -136,9 +137,10 @@ if plot_raw_data
     linkaxes([subplot(4,1,1) subplot(4,1,2) subplot(4,1,3) subplot(4,1,4)], 'xy')
     sgtitle("RAW data")
 
-
-    plot_name = 'raw_signal';
-    save_existing_plot(filepath, gcf, plot_name);
+    if save_figures
+        plot_name = 'raw_signal';
+        save_existing_plot(filepath, gcf, plot_name);
+    end
 end
 
 clear plot_raw_data
@@ -401,10 +403,10 @@ min_peak_distance = fs * min_peak_time_distance;
 
 % Visualizzazione dei picchi rilevati
 figure
-plot(locs, pks, 'O')
+plot(locs/fs, pks, 'O') % Convert locs to seconds
 hold on
-plot(filtData_total)
-xlabel('Samples')
+plot((1:length(filtData_total))/fs, filtData_total) % Convert samples to seconds
+xlabel('Time [s]')
 ylabel('Acceleration [m/s^2]')
 title('HR peak detected on Original signal')
 legend('Heart beat', 'Filtered signal')
@@ -412,12 +414,33 @@ legend('Heart beat', 'Filtered signal')
 % Calcolo della differenza di tempo tra i picchi (in campioni)
 dt_medio = diff(locs);
 
-% Calcolo della frequenza cardiaca media globale
-mean_hr = 1/(mean(dt_medio) / fs) * 60;
-fprintf('\n The calculated HR is %.0f \n', mean_hr)
-
 % Conversione delle differenze di tempo in secondi (se fs è in Hz)
 dt_medio_sec = dt_medio / fs;
+
+% Calculate instantaneous heart rate
+instantaneous_hr = 60 ./ dt_medio_sec; % Convert intervals to BPM
+
+% Calculate the time points for each HR value (midpoint between peaks)
+hr_time = (locs(1:end-1) + locs(2:end))/2 / fs;
+
+% Plot the evolution of heart rate
+figure;
+plot(hr_time, instantaneous_hr);
+xlabel('Time [s]');
+ylabel('Heart Rate [BPM]');
+title('Evolution of Heart Rate');
+
+% Calculate the mean heart rate during the first 3 seconds
+first_3_sec_indices = hr_time <= 3;
+mean_hr_first_3_sec = mean(instantaneous_hr(first_3_sec_indices));
+disp(['\n Mean HR during the first 3 seconds: ', num2str(mean_hr_first_3_sec), ' BPM \n']);
+
+% Calculate the mean heart rate in the 3 seconds around the 60th second
+around_60_sec_indices = hr_time >= 58.5 & hr_time <= 61.5;
+mean_hr_around_60_sec = mean(instantaneous_hr(around_60_sec_indices));
+disp(['\nMean HR in the 3 seconds around the 60th second: ', num2str(mean_hr_around_60_sec), ' BPM \n']);
+
+
 
 % Numero di picchi consecutivi da utilizzare per il calcolo della HR
 n = 10;
@@ -425,12 +448,15 @@ n = 10;
 % Calcolo dell'evoluzione della frequenza cardiaca utilizzando n picchi consecutivi
 num_windows = floor(length(dt_medio_sec) / (n - 1));
 hr_evolution = zeros(1, num_windows);
+hr_evolution_time = zeros(1, num_windows);
 
 for i = 1:num_windows
     start_idx = (i - 1) * (n - 1) + 1;
     end_idx = start_idx + n - 2;
     if end_idx <= length(dt_medio_sec)
         hr_evolution(i) = 60 / mean(dt_medio_sec(start_idx:end_idx));
+        % Calculate the midpoint time for the current window
+        hr_evolution_time(i) = mean(hr_time(start_idx:end_idx));
     end
 end
 
@@ -444,125 +470,139 @@ xlabel('Window Number');
 ylabel('Heart Rate (bpm)');
 grid on;
 
+if save_figures
+    plot_name = 'Heart rate evolution - RAW';
+    save_existing_plot(filepath, gcf, plot_name);
+end
 %% Exponenttial data fitting
-
-exp_data = hr_evolution;
-
-%% DATA CLEANING
-% Define X based on the length of cwt_data
-X = (0:length(exp_data)-1)';  % Generating X values assuming they are uniformly spaced
-
-% Extract Y from cwt_data
-Y = exp_data(:);  % Ensure Y is a column vector
-
-% Parameters
-windowSize = 20;
-thresholdFactorHigher = 4;
-thresholdFactorLower = 0.5;
-overlapPercentage = 0.2;  % Set the overlap percentage
-
-% Calculate the step size based on the overlap percentage
-stepSize = windowSize * (1 - overlapPercentage / 100);
-
-% Initialize arrays to store cleaned data and discarded points
-cleanedX = [];
-cleanedY = [];
-discardedX = [];
-discardedY = [];
-
-% Loop over the data with a sliding window
-i = 1;
-while i <= length(Y)
-    % Define the window range
-    startIdx = max(1, round(i));
-    endIdx = min(length(Y), round(i + windowSize - 1));
+if use_exponential
+    exp_data = hr_evolution;
     
-    % Extract the window data
-    windowData = Y(startIdx:endIdx);
+    %% DATA CLEANING
+    % Define X based on the length of cwt_data
+    %X = (0:length(exp_data)-1)';  % Generating X values assuming they are uniformly spaced
+    X = hr_evolution_time;
     
-    % Calculate mean and standard deviation of the window
-    windowMean = mean(windowData);
-    %windowMean = median(windowData);
-    windowStd = std(windowData);
+    % Extract Y from cwt_data
+    Y = exp_data(:);  % Ensure Y is a column vector
     
-    % Check each point in the window
-    for j = startIdx:endIdx
-        if Y(j) >= (windowMean - thresholdFactorLower * windowStd) && Y(j) <= (windowMean + thresholdFactorHigher * windowStd)
-            cleanedX(end+1) = X(j);
-            cleanedY(end+1) = Y(j);
-        else
-            discardedX(end+1) = X(j);
-            discardedY(end+1) = Y(j);
+    % Parameters
+    windowSize = 20;
+    thresholdFactorHigher = 4;
+    thresholdFactorLower = 0.3;
+    overlapPercentage = 0.2;  % Set the overlap percentage
+    
+    % Calculate the step size based on the overlap percentage
+    stepSize = windowSize * (1 - overlapPercentage / 100);
+    
+    % Initialize arrays to store cleaned data and discarded points
+    cleanedX = [];
+    cleanedY = [];
+    discardedX = [];
+    discardedY = [];
+    
+    % Loop over the data with a sliding window
+    i = 1;
+    while i <= length(Y)
+        % Define the window range
+        startIdx = max(1, round(i));
+        endIdx = min(length(Y), round(i + windowSize - 1));
+        
+        % Extract the window data
+        windowData = Y(startIdx:endIdx);
+        
+        % Calculate mean and standard deviation of the window
+        windowMean = mean(windowData);
+        %windowMean = median(windowData);
+        windowStd = std(windowData);
+        
+        % Check each point in the window
+        for j = startIdx:endIdx
+            if Y(j) >= (windowMean - thresholdFactorLower * windowStd) && Y(j) <= (windowMean + thresholdFactorHigher * windowStd)
+                cleanedX(end+1) = X(j);
+                cleanedY(end+1) = Y(j);
+            else
+                discardedX(end+1) = X(j);
+                discardedY(end+1) = Y(j);
+            end
         end
+        
+        % Move the window
+        i = i + stepSize;
     end
     
-    % Move the window
-    i = i + stepSize;
+    % Plot the original data, cleaned data, and discarded data
+    fontSize = 7;
+    
+    figure;
+    plot(X, Y, 'b*', 'LineWidth', 2, 'MarkerSize', 6);  % Original data
+    hold on;
+    plot(cleanedX, cleanedY, 'go', 'LineWidth', 2, 'MarkerSize', 6);  % Cleaned data
+    plot(discardedX, discardedY, 'rx', 'LineWidth', 2, 'MarkerSize', 6);  % Discarded data
+    grid on;
+    titleString = sprintf('Data Cleaning with %.0f-Sample Window', windowSize);
+    title(titleString, 'FontSize', fontSize);
+    xlabel('X', 'FontSize', fontSize);
+    ylabel('Y', 'FontSize', fontSize);
+    legend('Original Data', 'Cleaned Data', 'Discarded Data', 'Location', 'best');
+    legendHandle.FontSize = 10;
+    
+    if save_figures
+        plot_name = 'Heart rate data cleaning';
+        save_existing_plot(filepath, gcf, plot_name);
+    end
+    %% Exponential decay
+    x = cleanedX;
+    y = cleanedY;
+    tbl = table(x', y');
+    
+    % Define the model as Y = a * exp(-b * x) + c
+    modelfun = @(b,x) b(1) * exp(-b(2)*x(:, 1)) + b(3);
+    
+    % Initial guess for the parameters [a, b, c]
+    initial_guess_a = max(y) - min(y);  % a should be roughly the range of y
+    initial_guess_b = 0.1;              % b should be a small positive number
+    initial_guess_c = min(y);           % c should be around the minimum of y
+    beta0 = [initial_guess_a, initial_guess_b, initial_guess_c];
+    
+    % Fit the model
+    mdl = fitnlm(tbl, modelfun, beta0);
+    
+    % Extract the coefficient values from the model object.
+    coefficients = mdl.Coefficients{:, 'Estimate'};
+    
+    % Print the decay parameters to the terminal
+    fprintf('Decay parameters:\n');
+    fprintf('a = %.6f\n', coefficients(1));
+    fprintf('b = %.6f\n', coefficients(2));
+    fprintf('c = %.6f\n', coefficients(3));
+    
+    % Create smoothed/regressed data using the model:
+    yFitted = coefficients(1) * exp(-coefficients(2)*x) + coefficients(3);
+    
+    % Plot the fitted model along with the original data
+    figure;
+    hold on;
+    plot(x, y, 'b*', 'LineWidth', 2, 'MarkerSize', 5); % Noisy data
+    plot(x, yFitted, 'r-', 'LineWidth', 2);             % Fitted curve
+    grid on;
+    title('Exponential Regression with fitnlm()', 'FontSize', fontSize);
+    xlabel('Samples window', 'FontSize', fontSize);
+    ylabel('BPM', 'FontSize', fontSize);
+    legendHandle = legend('Noisy Y', 'Fitted Y', 'Location', 'north');
+    legendHandle.FontSize = fontSize;
+    formulaString = sprintf('Y = %.3f * exp(-%.3f * X) + %.3f', coefficients(1), coefficients(2), coefficients(3));
+    text(mean(x), max(y), formulaString, 'FontSize', 15, 'FontWeight', 'bold');
+    
+    % Set up figure properties:
+    set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1]);
+    set(gcf, 'Name', 'Exponential Decay Fit', 'NumberTitle', 'Off');
+    
+    if save_figures
+        plot_name = 'Heart rate evolution - Exponential fit';
+        save_existing_plot(filepath, gcf, plot_name);
+    end
 end
-
-% Plot the original data, cleaned data, and discarded data
-fontSize = 7;
-
-figure;
-plot(X, Y, 'b*', 'LineWidth', 2, 'MarkerSize', 6);  % Original data
-hold on;
-plot(cleanedX, cleanedY, 'go', 'LineWidth', 2, 'MarkerSize', 6);  % Cleaned data
-plot(discardedX, discardedY, 'rx', 'LineWidth', 2, 'MarkerSize', 6);  % Discarded data
-grid on;
-titleString = sprintf('Data Cleaning with %.0f-Sample Window', windowSize);
-title(titleString, 'FontSize', fontSize);
-xlabel('X', 'FontSize', fontSize);
-ylabel('Y', 'FontSize', fontSize);
-legend('Original Data', 'Cleaned Data', 'Discarded Data', 'Location', 'best');
-legendHandle.FontSize = 10;
-
-%% Exponential decay
-x = cleanedX;
-y = cleanedY;
-tbl = table(x', y');
-
-% Define the model as Y = a * exp(-b * x) + c
-modelfun = @(b,x) b(1) * exp(-b(2)*x(:, 1)) + b(3);
-
-% Initial guess for the parameters [a, b, c]
-initial_guess_a = max(y) - min(y);  % a should be roughly the range of y
-initial_guess_b = 0.1;              % b should be a small positive number
-initial_guess_c = min(y);           % c should be around the minimum of y
-beta0 = [initial_guess_a, initial_guess_b, initial_guess_c];
-
-% Fit the model
-mdl = fitnlm(tbl, modelfun, beta0);
-
-% Extract the coefficient values from the model object.
-coefficients = mdl.Coefficients{:, 'Estimate'};
-
-% Print the decay parameters to the terminal
-fprintf('Decay parameters:\n');
-fprintf('a = %.6f\n', coefficients(1));
-fprintf('b = %.6f\n', coefficients(2));
-fprintf('c = %.6f\n', coefficients(3));
-
-% Create smoothed/regressed data using the model:
-yFitted = coefficients(1) * exp(-coefficients(2)*x) + coefficients(3);
-
-% Plot the fitted model along with the original data
-figure;
-hold on;
-plot(x, y, 'b*', 'LineWidth', 2, 'MarkerSize', 5); % Noisy data
-plot(x, yFitted, 'r-', 'LineWidth', 2);             % Fitted curve
-grid on;
-title('Exponential Regression with fitnlm()', 'FontSize', fontSize);
-xlabel('Samples window', 'FontSize', fontSize);
-ylabel('BPM', 'FontSize', fontSize);
-legendHandle = legend('Noisy Y', 'Fitted Y', 'Location', 'north');
-legendHandle.FontSize = fontSize;
-formulaString = sprintf('Y = %.3f * exp(-%.3f * X) + %.3f', coefficients(1), coefficients(2), coefficients(3));
-text(mean(x), max(y), formulaString, 'FontSize', 15, 'FontWeight', 'bold');
-
-% Set up figure properties:
-set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1]);
-set(gcf, 'Name', 'Exponential Decay Fit', 'NumberTitle', 'Off');
-
 %%  Envelope of the obtained data
 % Doesn't work
 % En_cutoff_freq = 4;
@@ -608,114 +648,103 @@ set(gcf, 'Name', 'Exponential Decay Fit', 'NumberTitle', 'Off');
 
 %% Wavelet
 
-% Not working, maybe can be optimized but there's not enough time
-
-% cwt_signal = filtData_total;
-% % Parameters
-% fs = 1000; % Sampling frequency in Hz
-% t = 0:1/fs:1-1/fs; % Time axis of 1 second
-% 
-% % Parameters of the first main peak
-% amp1 = 1; % Amplitude of the first peak
-% freq1 = 5; % Frequency of the first peak in Hz
-% duration1 = 0.1; % Duration of the first peak in seconds
-% start_time1 = 0.3; % Start time of the first peak in seconds
-% 
-% % Parameters of the second secondary peak
-% amp2 = 0.2; % Amplitude of the second peak
-% freq2 = 10; % Frequency of the second peak in Hz
-% duration2 = 0.05; % Duration of the second peak in seconds
-% start_time2 = 0.3845; % Start time of the second peak in seconds
-% 
-% % Create the reference signal
-% signal = create_signal(fs, t, amp1, freq1, duration1, start_time1, amp2, freq2, duration2, start_time2);
-% 
-% % Perform CWT
-% [cfs, frequencies] = cwt(cwt_signal, fs);
-% 
-% % Find the specific form of interest
-% % Here you need to define a criterion to identify the peaks, for example by thresholding
-% threshold = 0.5; % Example threshold, adjust as needed
-% heartbeat_instants = [];
-% 
-% for i = 1:length(t)
-%     if max(abs(cfs(:, i))) > threshold
-%         heartbeat_instants = [heartbeat_instants, t(i)];
-%     end
-% end
-% 
-% % Calculate heart rate (in beats per minute)
-% heartbeat_instants_diff = diff(heartbeat_instants);
-% heart_rate = 60 ./ heartbeat_instants_diff;
-% 
-% % Display results
-% %disp('Heartbeats detected at:');
-% %disp(heartbeat_instants);
-% disp('Heart rate (BPM):');
-% disp(heart_rate);
-% 
-%  % Plot the original signal and identified peaks
-%     figure;
-%     plot(cwt_signal, 'b'); 
-%     hold on;
-%     plot(heartbeat_instants, cwt_signal(round(heartbeat_instants * fs)), 'ro');
-%     xlabel('Time (s)');
-%     ylabel('Amplitude');
-%     title('Original Signal with Identified Peaks');
-%     legend('Original Signal', 'Identified Peaks');
-%     hold off;
-
-%% Exopnential dacey
-
-%signal_label = zeros(size(rawData_total,1),1);
-%signal_label(locs) = 1;
-
-% % Exp decay
-% x = cleanedX;
-% y = cleanedY;
-% tbl = table(x', y');
-% 
-% % Define the model as Y = a * exp(-b * x) + c
-% modelfun = @(b,x) b(1) * exp(-b(2)*x(:, 1)) + b(3);
-% 
-% % Initial guess for the parameters [a, b, c]
-% initial_guess_a = max(y) - min(y);  % a should be roughly the range of y
-% initial_guess_b = 0.1;              % b should be a small positive number
-% initial_guess_c = min(y);           % c should be around the minimum of y
-% beta0 = [initial_guess_a, initial_guess_b, initial_guess_c];
-% 
-% % Fit the model
-% mdl = fitnlm(tbl, modelfun, beta0);
-% 
-% % Extract the coefficient values from the model object.
-% coefficients = mdl.Coefficients{:, 'Estimate'};
-% 
-% % Print the decay parameters to the terminal
-% fprintf('Decay parameters:\n');
-% fprintf('a = %.6f\n', coefficients(1));
-% fprintf('b = %.6f\n', coefficients(2));
-% fprintf('c = %.6f\n', coefficients(3));
-% 
-% % Create smoothed/regressed data using the model:
-% yFitted = coefficients(1) * exp(-coefficients(2)*x) + coefficients(3);
-% 
-% % Plot the fitted model along with the original data
-% figure;
-% hold on;
-% plot(x, y, 'b*', 'LineWidth', 2, 'MarkerSize', 5); % Noisy data
-% plot(x, yFitted, 'r-', 'LineWidth', 2);             % Fitted curve
-% grid on;
-% title('Exponential Regression with fitnlm()', 'FontSize', fontSize);
-% xlabel('X', 'FontSize', fontSize);
-% ylabel('Y', 'FontSize', fontSize);
-% legendHandle = legend('Noisy Y', 'Fitted Y', 'Location', 'north');
-% legendHandle.FontSize = 10;
-% formulaString = sprintf('Y = %.3f * exp(-%.3f * X) + %.3f', coefficients(1), coefficients(2), coefficients(3));
-% text(mean(x), max(y), formulaString, 'FontSize', 25, 'FontWeight', 'bold');
-% 
-% % Set up figure properties:
-% set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1]);
-% set(gcf, 'Name', 'Exponential Decay Fit', 'NumberTitle', 'Off');
+%Not working, maybe can be optimized but there's not enough time
+if use_cwt
+    cwt_signal = filtData_total;
+    % Parametri del segnale
+    fs = 1000; % Frequenza di campionamento in Hz
+    finish_time = 0.1;
+    t = 0:1/fs:finish_time; % Asse temporale di 1 secondo
+    
+    % Parametri del primo picco principale
+    amp1 = 1; % Ampiezza del primo picco
+    freq1 = 15; % Frequenza del primo picco in Hz
+    duration1 = 0.033; % Durata del primo picco in secondi
+    start_time1 = 0.0; % Tempo di inizio del primo picco in secondi
+    
+    % Parametri del secondo picco secondario
+    amp2 = 0.2; % Ampiezza del secondo picco
+    freq2 = 30; % Frequenza del secondo picco in Hz
+    duration2 = 0.01; % Durata del secondo picco in secondi
+    start_time2 = 0.038; % Tempo di inizio del secondo picco in secondi
+    
+    % Creazione del segnale di riferimento chiamando la funzione
+    signal = create_signal(fs, t, amp1, freq1, duration1, start_time1, amp2, freq2, duration2, start_time2, finish_time);
+    
+    signal = signal(1:44);
+    t = t(1:44);
+    
+    % Define the new number of points
+    new_num_points = 12;
+    
+    % Generate new time vector with 12 points evenly spaced between the min and max of the original time vector
+    t_resampled = linspace(min(t), max(t), new_num_points);
+    
+    % Use interp1 to resample the signal at the new time points
+    signal_resampled = interp1(t, signal, t_resampled, 'linear'); % You can also use other interpolation methods like 'spline'
+    
+    % Plot the original and resampled signals for comparison
+    figure;
+    plot(t, signal, 'o-', 'DisplayName', 'Original Signal');
+    hold on;
+    plot(t_resampled, signal_resampled, 'x-', 'DisplayName', 'Resampled Signal');
+    xlabel('Time');
+    ylabel('Signal');
+    title('Original and Resampled Signals');
+    legend('show');
+    grid on;
+    
+    % Perform CWT on the original signal
+    [cfs, frequencies] = cwt(cwt_signal, 'amor', fs);
+    
+    % Plot the CWT scalogram
+    figure;
+    t_cwt = (0:length(cwt_signal)-1)/fs;
+    imagesc(t_cwt, frequencies, abs(cfs));
+    axis xy;
+    xlabel('Time (s)');
+    ylabel('Frequency (Hz)');
+    title('CWT Scalogram');
+    colorbar;
+    
+    % Identify peaks based on a threshold
+    threshold = 0.3;
+    heartbeat_instants = [];
+    
+    for i = 1:length(t_cwt)
+        if max(abs(cfs(:, i))) > threshold
+            heartbeat_instants = [heartbeat_instants, t_cwt(i)];
+        end
+    end
+    
+    % Calculate heart rate in beats per minute
+    heartbeat_instants_diff = diff(heartbeat_instants);
+    heart_rate = 60 ./ heartbeat_instants_diff;
+    
+    % Display heart rate
+    disp('Heart rate (BPM):');
+    disp(heart_rate);
+    
+    % Find the closest indices in the cwt_signal
+    heartbeat_indices = arrayfun(@(x) find(abs(t_cwt - x) == min(abs(t_cwt - x)), 1), heartbeat_instants);
+    
+    % Plot the original signal with identified peaks
+    figure;
+    plot(t_cwt, cwt_signal, 'b');
+    hold on;
+    plot(t_cwt(heartbeat_indices), cwt_signal(heartbeat_indices), 'ro');
+    xlabel('Time (s)');
+    ylabel('Amplitude');
+    title('Original Signal with Identified Peaks');
+    legend('Original Signal', 'Identified Peaks');
+    grid on;
+    hold off;
+    
+    
+    
+    % Plot the correlation color map
+    plot_correlation_color_map(cfs, t_cwt, frequencies);
+end
 %% Normalize the data (optional but recommended for neural network training)
 
 % X = cleanedX;
@@ -771,20 +800,25 @@ set(gcf, 'Name', 'Exponential Decay Fit', 'NumberTitle', 'Off');
 
 
 
-function signal = create_signal(fs, t, amp1, freq1, duration1, start_time1, amp2, freq2, duration2, start_time2)
-    % Initialize the signal with zeros
+
+function signal = create_signal(fs, t, amp1, freq1, duration1, start_time1, amp2, freq2, duration2, start_time2, finish_time)
+    % Creazione del segnale di riferimento
     signal = zeros(size(t));
-
-    % Create the first peak
-    start_index1 = round(start_time1 * fs);
-    end_index1 = start_index1 + round(duration1 * fs) - 1;
-    signal(start_index1:end_index1) = amp1 * sin(2 * pi * freq1 * t(1:(end_index1 - start_index1 + 1)));
-
-    % Create the second peak
-    start_index2 = round(start_time2 * fs);
-    end_index2 = start_index2 + round(duration2 * fs) - 1;
-    signal(start_index2:end_index2) = amp2 * sin(2 * pi * freq2 * t(1:(end_index2 - start_index2 + 1)));
+    
+    % Primo picco
+    start_idx1 = ceil(start_time1 * fs)+1;
+    end_idx1 = start_idx1 + round(duration1 * fs) - 1;
+    sig = amp1 * sin(2 * pi * freq1 * (0:1/fs:finish_time));
+    signal(start_idx1:end_idx1) = signal(start_idx1:end_idx1) + sig(start_idx1:end_idx1);
+    clear sig
+    
+    % Secondo picco
+    start_idx2 = ceil(start_time2 * fs)+1;
+    end_idx2 = start_idx2 + round(duration2 * fs) - 1;
+    sig = amp2 * sin(2 * pi * freq2 * (0:1/fs:finish_time)+2*pi);
+    signal(32:32+12) = sig(5:17);
 end
+
 
 function save_existing_plot(filepath, plot_handle, plot_name)
     % Extract the last folder name from the filepath
@@ -820,4 +854,16 @@ function save_existing_plot(filepath, plot_handle, plot_name)
     
     disp(['Plot saved as PNG to: ' new_filepath_png]);
     disp(['Plot saved as FIG to: ' new_filepath_fig]);
+end
+
+% Function to plot correlation color map
+function plot_correlation_color_map(cfs, t, frequencies)
+    correlation_matrix = corrcoef(abs(cfs'));
+    figure;
+    imagesc(t, frequencies, correlation_matrix);
+    axis xy;
+    xlabel('Time (s)');
+    ylabel('Frequency (Hz)');
+    title('Correlation Color Map');
+    colorbar;
 end
