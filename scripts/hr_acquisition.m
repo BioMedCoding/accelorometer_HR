@@ -4,12 +4,11 @@ close all
 clc
 
 %% Filtering parameters - initials
-
 select_data = true;
 
 % Initial and ending value 
-starting_sample = 600;
-ending_sample = 1000000;
+starting_sample = 300;
+ending_sample = 90000;
 
 use_cheby2 = true;
 
@@ -58,7 +57,7 @@ plot_signal_comparison = true;
 use_exponential = true;
 use_cwt = false;
 %% Findpeaks parameters
-min_peak_prominence = 0.05; % 0.01; for breath rate
+min_peak_prominence = 0.04; % 0.01; for breath rate
 min_peak_time_distance = 0.35; % Expressed in seconds
 min_threshold = 0.00001;
 
@@ -475,12 +474,12 @@ if save_figures
     save_existing_plot(filepath, gcf, plot_name);
 end
 %% Exponenttial data fitting
+
 if use_exponential
     exp_data = hr_evolution;
     
     %% DATA CLEANING
     % Define X based on the length of cwt_data
-    %X = (0:length(exp_data)-1)';  % Generating X values assuming they are uniformly spaced
     X = hr_evolution_time;
     
     % Extract Y from cwt_data
@@ -488,8 +487,8 @@ if use_exponential
     
     % Parameters
     windowSize = 20;
-    thresholdFactorHigher = 4;
-    thresholdFactorLower = 0.3;
+    thresholdFactorHigher = 0.5;
+    thresholdFactorLower = 0.5;
     overlapPercentage = 0.2;  % Set the overlap percentage
     
     % Calculate the step size based on the overlap percentage
@@ -513,7 +512,6 @@ if use_exponential
         
         % Calculate mean and standard deviation of the window
         windowMean = mean(windowData);
-        %windowMean = median(windowData);
         windowStd = std(windowData);
         
         % Check each point in the window
@@ -542,8 +540,8 @@ if use_exponential
     grid on;
     titleString = sprintf('Data Cleaning with %.0f-Sample Window', windowSize);
     title(titleString, 'FontSize', fontSize);
-    xlabel('X', 'FontSize', fontSize);
-    ylabel('Y', 'FontSize', fontSize);
+    xlabel('Time [s]', 'FontSize', fontSize);
+    ylabel('Heart Rate [BPM]', 'FontSize', fontSize);
     legend('Original Data', 'Cleaned Data', 'Discarded Data', 'Location', 'best');
     legendHandle.FontSize = 10;
     
@@ -551,34 +549,62 @@ if use_exponential
         plot_name = 'Heart rate data cleaning';
         save_existing_plot(filepath, gcf, plot_name);
     end
-    %% Exponential decay
-    x = cleanedX;
-    y = cleanedY;
-    tbl = table(x', y');
+
+    %% Check for NaN or Inf in cleaned data
+    if any(isnan(cleanedX)) || any(isnan(cleanedY)) || any(isinf(cleanedX)) || any(isinf(cleanedY))
+        error('Cleaned data contains NaN or Inf values');
+    end
+
+    %% Exponential decay fitting
+    x = cleanedX(:);
+    y = cleanedY(:);
+    
+    % Scale y to avoid numerical issues
+    y_mean = mean(y);
+    y_std = std(y);
+    
+    y_scaled = (y - y_mean) / y_std;
+    
+    tbl = table(x, y_scaled);
     
     % Define the model as Y = a * exp(-b * x) + c
-    modelfun = @(b,x) b(1) * exp(-b(2)*x(:, 1)) + b(3);
+    modelfun = @(b,x) b(1) * exp(-b(2) * x) + b(3);
     
     % Initial guess for the parameters [a, b, c]
-    initial_guess_a = max(y) - min(y);  % a should be roughly the range of y
-    initial_guess_b = 0.1;              % b should be a small positive number
-    initial_guess_c = min(y);           % c should be around the minimum of y
+    initial_guess_a = max(y_scaled) - min(y_scaled);  % a should be roughly the range of y
+    initial_guess_b = 0.05;                            % b should be a small positive number
+    initial_guess_c = min(y_scaled);                  % c should be around the minimum of y , can be imptroved using a mean if the n lowest values
     beta0 = [initial_guess_a, initial_guess_b, initial_guess_c];
     
-    % Fit the model
-    mdl = fitnlm(tbl, modelfun, beta0);
+    % Ensure initial guesses are finite
+    if any(~isfinite(beta0))
+        error('Initial parameter guesses are not finite');
+    end
+
+    % Fit the model with robust options
+    opts = statset('nlinfit');
+    opts.RobustWgtFun = 'bisquare';  % Use robust fitting
+    
+    try
+        mdl = fitnlm(tbl, modelfun, beta0, 'Options', opts);
+    catch ME
+        error('Error in nonlinear fitting: %s', ME.message);
+    end
     
     % Extract the coefficient values from the model object.
     coefficients = mdl.Coefficients{:, 'Estimate'};
     
     % Print the decay parameters to the terminal
     fprintf('Decay parameters:\n');
-    fprintf('a = %.6f\n', coefficients(1));
-    fprintf('b = %.6f\n', coefficients(2));
-    fprintf('c = %.6f\n', coefficients(3));
+    fprintf('a = %.4f\n', coefficients(1));
+    fprintf('b = %.4f\n', coefficients(2));
+    fprintf('c = %.4f\n', coefficients(3));
     
     % Create smoothed/regressed data using the model:
-    yFitted = coefficients(1) * exp(-coefficients(2)*x) + coefficients(3);
+    yFitted_scaled = coefficients(1) * exp(-coefficients(2) * x) + coefficients(3);
+    
+    % Rescale the fitted data back to original scale
+    yFitted = yFitted_scaled * y_std + y_mean;
     
     % Plot the fitted model along with the original data
     figure;
@@ -587,8 +613,8 @@ if use_exponential
     plot(x, yFitted, 'r-', 'LineWidth', 2);             % Fitted curve
     grid on;
     title('Exponential Regression with fitnlm()', 'FontSize', fontSize);
-    xlabel('Samples window', 'FontSize', fontSize);
-    ylabel('BPM', 'FontSize', fontSize);
+    xlabel('Time [s]', 'FontSize', fontSize);
+    ylabel('Heart Rate [BPM]', 'FontSize', fontSize);
     legendHandle = legend('Noisy Y', 'Fitted Y', 'Location', 'north');
     legendHandle.FontSize = fontSize;
     formulaString = sprintf('Y = %.3f * exp(-%.3f * X) + %.3f', coefficients(1), coefficients(2), coefficients(3));
@@ -603,6 +629,8 @@ if use_exponential
         save_existing_plot(filepath, gcf, plot_name);
     end
 end
+
+
 %%  Envelope of the obtained data
 % Doesn't work
 % En_cutoff_freq = 4;
@@ -745,7 +773,7 @@ if use_cwt
     % Plot the correlation color map
     plot_correlation_color_map(cfs, t_cwt, frequencies);
 end
-%% Normalize the data (optional but recommended for neural network training)
+%% NN
 
 % X = cleanedX;
 % Y = cleanedY;
