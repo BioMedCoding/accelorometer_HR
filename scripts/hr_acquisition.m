@@ -34,9 +34,8 @@ maximum_filter_order = 20;
 
 % Define the prototype filter with desired stopband edges
 prototype_filter = struct();
-prototype_filter.low_stopband = 0.5;  % Example stopband edge for low-pass filter (normalized frequency)
-prototype_filter.high_stopband = 4; % Example stopband edge for high-pass filter (normalized frequency)
-
+prototype_filter.low_stopband = 0.5;  
+prototype_filter.high_stopband = 4;
 save_figures = false; 
 %% Section parameters
 filter_data_classic = false;
@@ -63,7 +62,8 @@ min_threshold = 0.00001;
 
 
 %% Data import and separation
-%attitude = readmatrix("Signals\test\)
+%attitude = readmatrix("Signals\test\)   % Attitude data are useful in this
+% specific case
 %attitude_t = attitude(:,1);
 %attitude_phi = attitude(:,2);
 %attitude_theta = attitude(:,3);
@@ -71,20 +71,20 @@ min_threshold = 0.00001;
 
 %raw_data = readmatrix("Signals\Andràs_resting\Raw Data.csv");
 
-% Chiedi all'utente di selezionare il file CSV
+% Ask the user which .csv must be opened
 if select_data
     [filename, pathname] = uigetfile('*.csv', 'Seleziona il file CSV con i dati grezzi');
     
-    % Verifica se l'utente ha selezionato un file
+    % Check if the selection is ok
     if isequal(filename, 0)
         disp('Nessun file selezionato');
     else
-        % Leggi i dati dal file selezionato
+        % Read data from the specified file
         filepath = fullfile(pathname, filename);
         raw_data = readmatrix(filepath);
     end
 
-else
+else % Load a specific file used as reference
     raw_data = readmatrix("C:\Users\matte\Documents\GitHub\accelo_HR\data\Andràs_mediumIntensity\Raw Data.csv");
 end
 
@@ -95,7 +95,7 @@ rawData_y = raw_data(:,3);
 rawData_z = raw_data(:,4);
 
 % Calculate the total acceleration
-rawData_total = sqrt(rawData_x.^2 + rawData_y.^2 + rawData_z.^2);
+rawData_total = sqrt(rawData_x.^2 + rawData_y.^2 + rawData_z.^2);   % The use of the total acceleration prevents data leaks to other axes and make the script more robust
 
 % Sampling frequency calculation
 time_interval = diff(rawData_t);
@@ -319,6 +319,7 @@ if show_filtered_psd
     filt_titles = ["Filtered Normalised PSD of the signal - x", "Filtered Normalised PSD of the signal - y", "Filtered Normalised PSD of the signal - z", "Filtered Normalised PSD of the signal - total"]; % Titles for subplots
     
     %psd_filt = zeros(size(raw_data));
+
     % Initial PSD of the attitude signal
     figure
     for i = 1:4
@@ -392,15 +393,16 @@ clear filt_signals filt_titles show_filtered_psd
 clear plot_signal_psd_comparison
 end
 
-% Definizione dei parametri per il rilevamento dei picchi
+% Define parameters for peak detection using the setting specified in the
+% initial part of the script
 min_peak_distance = fs * min_peak_time_distance;
 
-% Altri parametri utili
+% Other useful parameters
 % 'MinPeakHeight'
-% 'Threshold': altezza minima che un picco deve avere rispetto ai vicini
+% 'Threshold': minimum height that a peak must exceed from his neightours
 [pks, locs, w, p] = findpeaks(filtData_total, 'Threshold', min_threshold, 'MinPeakDistance', min_peak_distance, 'MinPeakProminence', min_peak_prominence);
 
-% Visualizzazione dei picchi rilevati
+% Show extracted peaks
 figure
 plot(locs/fs, pks, 'O') % Convert locs to seconds
 hold on
@@ -410,10 +412,10 @@ ylabel('Acceleration [m/s^2]')
 title('HR peak detected on Original signal')
 legend('Heart beat', 'Filtered signal')
 
-% Calcolo della differenza di tempo tra i picchi (in campioni)
+% Difference between peaks in samples
 dt_medio = diff(locs);
 
-% Conversione delle differenze di tempo in secondi (se fs è in Hz)
+% Convert sample differences in time (if fs is in Hz)
 dt_medio_sec = dt_medio / fs;
 
 % Calculate instantaneous heart rate
@@ -441,10 +443,10 @@ disp(['\nMean HR in the 3 seconds around the 60th second: ', num2str(mean_hr_aro
 
 
 
-% Numero di picchi consecutivi da utilizzare per il calcolo della HR
+% Number of consecutives peaks to calculate the updated HR evolution
 n = 10;
 
-% Calcolo dell'evoluzione della frequenza cardiaca utilizzando n picchi consecutivi
+% Calculate HR evolututin using n successive peaks
 num_windows = floor(length(dt_medio_sec) / (n - 1));
 hr_evolution = zeros(1, num_windows);
 hr_evolution_time = zeros(1, num_windows);
@@ -461,7 +463,7 @@ end
 
 fprintf('\n The median HR frequency is %.1f \n', median(hr_evolution))
 
-% Visualizzazione dell'evoluzione della frequenza cardiaca
+% Show HR frequency evolution in time
 figure;
 plot(hr_evolution);
 title('Heart Rate Evolution Over Time - RAW');
@@ -676,103 +678,103 @@ end
 
 %% Wavelet
 
-%Not working, maybe can be optimized but there's not enough time
-if use_cwt
-    cwt_signal = filtData_total;
-    % Parametri del segnale
-    fs = 1000; % Frequenza di campionamento in Hz
-    finish_time = 0.1;
-    t = 0:1/fs:finish_time; % Asse temporale di 1 secondo
-    
-    % Parametri del primo picco principale
-    amp1 = 1; % Ampiezza del primo picco
-    freq1 = 15; % Frequenza del primo picco in Hz
-    duration1 = 0.033; % Durata del primo picco in secondi
-    start_time1 = 0.0; % Tempo di inizio del primo picco in secondi
-    
-    % Parametri del secondo picco secondario
-    amp2 = 0.2; % Ampiezza del secondo picco
-    freq2 = 30; % Frequenza del secondo picco in Hz
-    duration2 = 0.01; % Durata del secondo picco in secondi
-    start_time2 = 0.038; % Tempo di inizio del secondo picco in secondi
-    
-    % Creazione del segnale di riferimento chiamando la funzione
-    signal = create_signal(fs, t, amp1, freq1, duration1, start_time1, amp2, freq2, duration2, start_time2, finish_time);
-    
-    signal = signal(1:44);
-    t = t(1:44);
-    
-    % Define the new number of points
-    new_num_points = 12;
-    
-    % Generate new time vector with 12 points evenly spaced between the min and max of the original time vector
-    t_resampled = linspace(min(t), max(t), new_num_points);
-    
-    % Use interp1 to resample the signal at the new time points
-    signal_resampled = interp1(t, signal, t_resampled, 'linear'); % You can also use other interpolation methods like 'spline'
-    
-    % Plot the original and resampled signals for comparison
-    figure;
-    plot(t, signal, 'o-', 'DisplayName', 'Original Signal');
-    hold on;
-    plot(t_resampled, signal_resampled, 'x-', 'DisplayName', 'Resampled Signal');
-    xlabel('Time');
-    ylabel('Signal');
-    title('Original and Resampled Signals');
-    legend('show');
-    grid on;
-    
-    % Perform CWT on the original signal
-    [cfs, frequencies] = cwt(cwt_signal, 'amor', fs);
-    
-    % Plot the CWT scalogram
-    figure;
-    t_cwt = (0:length(cwt_signal)-1)/fs;
-    imagesc(t_cwt, frequencies, abs(cfs));
-    axis xy;
-    xlabel('Time (s)');
-    ylabel('Frequency (Hz)');
-    title('CWT Scalogram');
-    colorbar;
-    
-    % Identify peaks based on a threshold
-    threshold = 0.3;
-    heartbeat_instants = [];
-    
-    for i = 1:length(t_cwt)
-        if max(abs(cfs(:, i))) > threshold
-            heartbeat_instants = [heartbeat_instants, t_cwt(i)];
-        end
-    end
-    
-    % Calculate heart rate in beats per minute
-    heartbeat_instants_diff = diff(heartbeat_instants);
-    heart_rate = 60 ./ heartbeat_instants_diff;
-    
-    % Display heart rate
-    disp('Heart rate (BPM):');
-    disp(heart_rate);
-    
-    % Find the closest indices in the cwt_signal
-    heartbeat_indices = arrayfun(@(x) find(abs(t_cwt - x) == min(abs(t_cwt - x)), 1), heartbeat_instants);
-    
-    % Plot the original signal with identified peaks
-    figure;
-    plot(t_cwt, cwt_signal, 'b');
-    hold on;
-    plot(t_cwt(heartbeat_indices), cwt_signal(heartbeat_indices), 'ro');
-    xlabel('Time (s)');
-    ylabel('Amplitude');
-    title('Original Signal with Identified Peaks');
-    legend('Original Signal', 'Identified Peaks');
-    grid on;
-    hold off;
-    
-    
-    
-    % Plot the correlation color map
-    plot_correlation_color_map(cfs, t_cwt, frequencies);
-end
+%Not working, maybe can be optimized but there's not enough time, also the
+% whole logic need a general review
+
+% if use_cwt
+%     cwt_signal = filtData_total;
+%     % Signal parameters
+%     fs = 1000; % Sample frequency in Hz
+%     finish_time = 0.1;
+%     t = 0:1/fs:finish_time; % Time axes of 1 s
+% 
+%     % First peak parameter
+%     amp1 = 1; % Amplitude
+%     freq1 = 15; % Frequency
+%     duration1 = 0.033; % Duration in s
+%     start_time1 = 0.0; % Starting time
+% 
+%     % Second peak parameter
+%     amp2 = 0.2; % Amplitude
+%     freq2 = 30; % Frequency
+%     duration2 = 0.01; % Duration in s
+%     start_time2 = 0.038; % Starting time
+% 
+%     % Creation of mother signal
+%     signal = create_signal(fs, t, amp1, freq1, duration1, start_time1, amp2, freq2, duration2, start_time2, finish_time);
+% 
+%     signal = signal(1:44);
+%     t = t(1:44);
+% 
+%     % Define the new number of points
+%     new_num_points = 12;
+% 
+%     % Generate new time vector with 12 points evenly spaced between the min and max of the original time vector
+%     t_resampled = linspace(min(t), max(t), new_num_points);
+% 
+%     % Use interp1 to resample the signal at the new time points
+%     signal_resampled = interp1(t, signal, t_resampled, 'linear'); % You can also use other interpolation methods like 'spline'
+% 
+%     % Plot the original and resampled signals for comparison
+%     figure;
+%     plot(t, signal, 'o-', 'DisplayName', 'Original Signal');
+%     hold on;
+%     plot(t_resampled, signal_resampled, 'x-', 'DisplayName', 'Resampled Signal');
+%     xlabel('Time');
+%     ylabel('Signal');
+%     title('Original and Resampled Signals');
+%     legend('show');
+%     grid on;
+% 
+%     % Perform CWT on the original signal
+%     [cfs, frequencies] = cwt(cwt_signal, 'amor', fs);
+% 
+%     % Plot the CWT scalogram
+%     figure;
+%     t_cwt = (0:length(cwt_signal)-1)/fs;
+%     imagesc(t_cwt, frequencies, abs(cfs));
+%     axis xy;
+%     xlabel('Time (s)');
+%     ylabel('Frequency (Hz)');
+%     title('CWT Scalogram');
+%     colorbar;
+% 
+%     % Identify peaks based on a threshold
+%     threshold = 0.3;
+%     heartbeat_instants = [];
+% 
+%     for i = 1:length(t_cwt)
+%         if max(abs(cfs(:, i))) > threshold
+%             heartbeat_instants = [heartbeat_instants, t_cwt(i)];
+%         end
+%     end
+% 
+%     % Calculate heart rate in beats per minute
+%     heartbeat_instants_diff = diff(heartbeat_instants);
+%     heart_rate = 60 ./ heartbeat_instants_diff;
+% 
+%     % Display heart rate
+%     disp('Heart rate (BPM):');
+%     disp(heart_rate);
+% 
+%     % Find the closest indices in the cwt_signal
+%     heartbeat_indices = arrayfun(@(x) find(abs(t_cwt - x) == min(abs(t_cwt - x)), 1), heartbeat_instants);
+% 
+%     % Plot the original signal with identified peaks
+%     figure;
+%     plot(t_cwt, cwt_signal, 'b');
+%     hold on;
+%     plot(t_cwt(heartbeat_indices), cwt_signal(heartbeat_indices), 'ro');
+%     xlabel('Time (s)');
+%     ylabel('Amplitude');
+%     title('Original Signal with Identified Peaks');
+%     legend('Original Signal', 'Identified Peaks');
+%     grid on;
+%     hold off;
+%
+%     % Plot the correlation color map
+%     plot_correlation_color_map(cfs, t_cwt, frequencies);
+% end
 %% NN
 
 % X = cleanedX;
@@ -830,17 +832,17 @@ end
 
 
 function signal = create_signal(fs, t, amp1, freq1, duration1, start_time1, amp2, freq2, duration2, start_time2, finish_time)
-    % Creazione del segnale di riferimento
+    % Mother signal creation
     signal = zeros(size(t));
     
-    % Primo picco
+    % First peak
     start_idx1 = ceil(start_time1 * fs)+1;
     end_idx1 = start_idx1 + round(duration1 * fs) - 1;
     sig = amp1 * sin(2 * pi * freq1 * (0:1/fs:finish_time));
     signal(start_idx1:end_idx1) = signal(start_idx1:end_idx1) + sig(start_idx1:end_idx1);
     clear sig
     
-    % Secondo picco
+    % Second peak
     start_idx2 = ceil(start_time2 * fs)+1;
     end_idx2 = start_idx2 + round(duration2 * fs) - 1;
     sig = amp2 * sin(2 * pi * freq2 * (0:1/fs:finish_time)+2*pi);
